@@ -1,0 +1,70 @@
+#Dockerfile นี้จะทำการสร้าง image ตัวใหม่โดยใช้ Jenkins official image เป็น base image 
+#และติดตั้ง Podman client รวมถึง openssh-client เพื่อให้ Jenkins สามารถเชื่อมต่อกับ 
+#Podman Machine ที่รันอยู่บน Windows host ผ่าน SSH ได้อย่างปลอดภัย 
+#โดยการตั้งค่า permissions ของ SSH key และ config file อย่างเหมาะสม
+
+# Dockerfile.jenkins - Custom Jenkins with Podman
+FROM jenkins/jenkins:jdk21
+
+# Switch to root to install packages
+USER root
+
+# Install podman client และ openssh-client
+RUN apt-get update && \
+    apt-get install -y \
+    podman \
+    openssh-client \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create SSH directory และตั้งค่า permissions
+RUN mkdir -p /var/jenkins_home/.ssh && \
+    chown -R jenkins:jenkins /var/jenkins_home/.ssh && \
+    chmod 700 /var/jenkins_home/.ssh
+
+# Create entrypoint script to setup SSH config at runtime
+RUN printf '#!/bin/bash\n\
+set -e\n\
+\n\
+# Setup SSH directory and config\n\
+mkdir -p /var/jenkins_home/.ssh\n\
+chmod 700 /var/jenkins_home/.ssh\n\
+\n\
+# Copy SSH key from mounted location if it exists and is not already copied\n\
+if [ -f /tmp/podman-machine-key ] && [ ! -f /var/jenkins_home/.ssh/id_rsa.copied ]; then\n\
+  cp /tmp/podman-machine-key /var/jenkins_home/.ssh/id_rsa\n\
+  chmod 600 /var/jenkins_home/.ssh/id_rsa\n\
+  chown jenkins:jenkins /var/jenkins_home/.ssh/id_rsa\n\
+  touch /var/jenkins_home/.ssh/id_rsa.copied\n\
+  echo "SSH key copied and permissions set"\n\
+elif [ -f /var/jenkins_home/.ssh/id_rsa ]; then\n\
+  chmod 600 /var/jenkins_home/.ssh/id_rsa 2>/dev/null || echo "Note: SSH key is read-only (mounted), will use as-is"\n\
+  echo "SSH key exists"\n\
+fi\n\
+\n\
+# Create SSH config if it does not exist\n\
+if [ ! -f /var/jenkins_home/.ssh/config ]; then\n\
+  cat > /var/jenkins_home/.ssh/config <<EOF\n\
+Host host.docker.internal\n\
+    StrictHostKeyChecking no\n\
+    UserKnownHostsFile=/dev/null\n\
+    Port 51016\n\
+    User user\n\
+    IdentityFile /var/jenkins_home/.ssh/id_rsa\n\
+EOF\n\
+  chmod 600 /var/jenkins_home/.ssh/config\n\
+  echo "SSH config created successfully"\n\
+fi\n\
+\n\
+# Set ownership to jenkins user\n\
+chown -R jenkins:jenkins /var/jenkins_home/.ssh 2>/dev/null || true\n\
+echo "SSH directory setup completed"\n\
+\n\
+# Start Jenkins as jenkins user using su\n\
+exec su -s /bin/bash jenkins -c "/usr/local/bin/jenkins.sh $*"\n\
+' > /usr/local/bin/setup-ssh.sh && \
+    chmod +x /usr/local/bin/setup-ssh.sh
+
+# Use custom entrypoint
+ENTRYPOINT ["/usr/local/bin/setup-ssh.sh"]
+

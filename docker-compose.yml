@@ -1,21 +1,36 @@
-# Define Network
-networks:
-  jenkins_network:
-    name: jenkins_network
-    driver: bridge
+# docker-compose.yml (Final Recommended Version for Windows/WSL)
 
-# Define Services
+version: "3.8"
+
 services:
   jenkins:
-    image: jenkins/jenkins:jdk21
+    # Using custom Jenkins image with Podman installed
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
     container_name: jenkins
-    volumes:
-      - ./jenkins_home:/var/jenkins_home # เพื่อให้ Jenkins สามารถเก็บข้อมูลไว้ใน host
-      - /var/run/docker.sock:/var/run/docker.sock # เพื่อให้ Jenkins สามารถใช้งาน Docker daemon ที่รันบน host ได้
+    restart: unless-stopped
+
     environment:
-      - JENKINS_OPTS=--httpPort=8800 # กำหนด Port สำหรับ Jenkins UI
+      # ใช้ SSH connection แทน socket (ใช้ host.docker.internal แทน 127.0.0.1)
+      - CONTAINER_HOST=ssh://user@host.docker.internal:51016/run/user/1000/podman/podman.sock
+      - CONTAINER_SSHKEY=/var/jenkins_home/.ssh/id_rsa
+
     ports:
-      - "8800:8800" # สำหรับ Jenkins UI
-    restart: always
-    networks:
-      - jenkins_network
+      - "8800:8080"
+      - "50000:50000"
+
+    volumes:
+      - jenkins_data:/var/jenkins_home:z
+
+      # Mount SSH private key to /tmp so it can be copied with proper permissions
+      - C:\Users\nutde\.local\share\containers\podman\machine\machine:/tmp/podman-machine-key:ro
+
+    extra_hosts:
+      # เพิ่ม host mapping เพื่อให้เข้าถึง Windows host
+      - "host.docker.internal:host-gateway"
+
+# Define the named volume here. This is the best practice.
+volumes:
+  jenkins_data:
+    driver: local
