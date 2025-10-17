@@ -1,7 +1,4 @@
 # docker-compose.yml (Final Recommended Version for Windows/WSL)
-
-version: "3.8"
-
 services:
   jenkins:
     # Using custom Jenkins image with Podman installed
